@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tutor. — AI Tutor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#12141c;
+    --panel:#181b27;
+    --panel-2:#1f2333;
+    --line:#2a2e42;
+    --paper:#f6f1e4;
+    --paper-ink:#2b2417;
+    --amber:#e7a339;
+    --amber-dim:#7a5a26;
+    --teal:#5fc2b0;
+    --coral:#e0665c;
+    --text-hi:#edeff7;
+    --text-lo:#9aa0be;
+    --radius:14px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--ink);
+    color:var(--text-hi);
+    font-family:'IBM Plex Sans',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .app{
+    display:grid;
+    grid-template-columns:240px 1fr;
+    min-height:100vh;
+    max-width:1180px;
+    margin:0 auto;
+  }
+  /* ---------- Sidebar ---------- */
+  .sidebar{
+    border-right:1px solid var(--line);
+    padding:28px 18px;
+    display:flex;
+    flex-direction:column;
+    gap:28px;
+  }
+  .wordmark{
+    font-family:'Fraunces',serif;
+    font-size:22px;
+    font-weight:500;
+    letter-spacing:-0.01em;
+    display:flex;
+    align-items:baseline;
+    gap:2px;
+  }
+  .wordmark .dot{color:var(--amber);}
+  .nav{display:flex;flex-direction:column;gap:2px;}
+  .nav button{
+    all:unset;
+    cursor:pointer;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 12px;
+    border-radius:10px;
+    font-size:13.5px;
+    color:var(--text-lo);
+    transition:background .15s ease, color .15s ease;
+  }
+  .nav button .num{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    color:var(--text-lo);
+    width:16px;
+  }
+  .nav button:hover{background:var(--panel-2); color:var(--text-hi);}
+  .nav button.active{background:var(--panel-2); color:var(--text-hi); box-shadow:inset 2px 0 0 var(--amber);}
+  .nav button.active .num{color:var(--amber);}
+
+  .sidebar-foot{margin-top:auto; border-top:1px solid var(--line); padding-top:16px; font-size:11.5px; color:var(--text-lo); line-height:1.6;}
+  .sidebar-foot b{color:var(--text-hi); font-weight:500;}
+  .status-dot{display:inline-block;width:6px;height:6px;border-radius:50%; background:var(--teal); margin-right:6px; box-shadow:0 0 0 3px rgba(95,194,176,.15);}
+  .key-pill{display:flex; align-items:center; gap:4px; flex-wrap:wrap;}
+  .key-change{all:unset; cursor:pointer; color:var(--amber); font-size:11px; text-decoration:underline; margin-left:4px;}
+
+  /* ---------- Stage ---------- */
+  .stage{padding:28px 34px; display:flex; flex-direction:column;}
+  .panel{display:none; flex-direction:column; gap:20px; flex:1;}
+  .panel.active{display:flex;}
+
+  .panel-head{display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;}
+  .panel-title{font-family:'Fraunces',serif; font-size:26px; font-weight:500;}
+  .panel-sub{font-size:12.5px; color:var(--text-lo); margin-top:4px;}
+
+  .receipt{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--amber);
+    background:rgba(231,163,57,.08); border:1px solid rgba(231,163,57,.25);
+    padding:5px 10px; border-radius:7px; width:fit-content;
+  }
+  .receipt .arrow{color:var(--amber-dim);}
+
+  /* ---------- Dial ---------- */
+  .dial-wrap{display:flex; flex-direction:column; gap:8px;}
+  .dial-track{position:relative; display:flex; justify-content:space-between; background:var(--panel-2); border:1px solid var(--line); border-radius:999px; padding:5px;}
+  .dial-stop{all:unset; cursor:pointer; z-index:2; flex:1; text-align:center; font-family:'IBM Plex Mono',monospace; font-size:11.5px; padding:7px 0; border-radius:999px; color:var(--text-lo); transition:color .2s ease;}
+  .dial-stop.on{color:var(--ink); font-weight:500;}
+  .dial-thumb{position:absolute; top:5px; bottom:5px; left:5px; width:calc(20% - 4px); background:linear-gradient(180deg,#f2bc5c,var(--amber)); border-radius:999px; box-shadow:0 0 0 1px rgba(231,163,57,.4), 0 4px 14px rgba(231,163,57,.35); transition:transform .28s cubic-bezier(.22,1,.36,1);}
+  .dial-caption{display:flex; justify-content:space-between; font-size:12px; color:var(--text-lo);}
+  .dial-caption b{color:var(--text-hi); font-weight:500;}
+  .dial-track.small{max-width:220px;}
+
+  /* ---------- Chat (Explain) ---------- */
+  .chat-scroll{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:20px; min-height:220px; display:flex; flex-direction:column; gap:14px; max-height:420px; overflow-y:auto;}
+  .bubble{max-width:78%; padding:12px 14px; border-radius:12px; font-size:13.5px; line-height:1.55;}
+  .bubble.user{align-self:flex-end; background:var(--panel-2); border:1px solid var(--line); color:var(--text-hi);}
+  .bubble.ai{align-self:flex-start; background:linear-gradient(180deg, rgba(231,163,57,var(--glow,.08)), rgba(231,163,57,0) 60%), var(--panel-2); border:1px solid rgba(231,163,57,.25); color:var(--text-hi); white-space:pre-wrap;}
+  .cursor{display:inline-block; width:6px; height:13px; background:var(--amber); vertical-align:-2px; animation:blink 1s step-start infinite;}
+  @keyframes blink{50%{opacity:0;}}
+
+  .input-row{display:flex; gap:10px;}
+  .input-row input[type=text]{flex:1; background:var(--panel); border:1px solid var(--line); color:var(--text-hi); padding:12px 14px; border-radius:10px; font-size:13.5px; font-family:inherit;}
+  .input-row input::placeholder{color:var(--text-lo);}
+  .btn{all:unset; cursor:pointer; background:var(--amber); color:#221605; font-weight:600; font-size:13px; padding:12px 18px; border-radius:10px; text-align:center; transition:transform .12s ease, filter .12s ease;}
+  .btn:hover{filter:brightness(1.08);}
+  .btn:active{transform:scale(.97);}
+  .btn:disabled{opacity:.55; cursor:default;}
+  .btn.ghost{background:transparent; color:var(--text-hi); border:1px solid var(--line);}
+
+  /* ---------- Summarize ---------- */
+  .split{display:grid; grid-template-columns:1fr 1fr; gap:18px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:18px;}
+  .card h4{margin:0 0 10px; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-lo); font-weight:500;}
+  textarea{width:100%; min-height:150px; resize:vertical; background:var(--panel-2); border:1px solid var(--line); border-radius:8px; color:var(--text-hi); font-family:inherit; font-size:13px; padding:12px; line-height:1.55;}
+  .ratio-row{display:flex; align-items:center; gap:12px; margin-top:12px;}
+  input[type=range]{flex:1; accent-color:var(--amber);}
+  .ratio-val{font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--amber); width:38px;}
+  .stat-row{display:flex; gap:18px; margin-top:14px;}
+  .stat{font-family:'IBM Plex Mono',monospace;}
+  .stat .n{font-size:20px; color:var(--text-hi); display:block;}
+  .stat .l{font-size:10.5px; color:var(--text-lo); text-transform:uppercase; letter-spacing:.05em;}
+  .out-text{font-size:13.5px; line-height:1.6; color:var(--text-hi); min-height:80px; white-space:pre-wrap;}
+
+  /* ---------- Generate row (cards/quiz) ---------- */
+  .gen-row{display:flex; gap:10px; align-items:center; flex-wrap:wrap;}
+  .gen-row input[type=text]{flex:1; min-width:160px; background:var(--panel); border:1px solid var(--line); color:var(--text-hi); padding:11px 14px; border-radius:10px; font-size:13.5px; font-family:inherit;}
+  .gen-row input[type=number]{width:64px; background:var(--panel); border:1px solid var(--line); color:var(--text-hi); padding:11px 10px; border-radius:10px; font-size:13.5px; font-family:inherit;}
+
+  /* ---------- Flashcards ---------- */
+  .card-stage{display:flex; flex-direction:column; align-items:center; gap:16px;}
+  .flip-zone{width:340px; height:220px; perspective:1400px; cursor:pointer;}
+  .flip-inner{position:relative; width:100%; height:100%; transform-style:preserve-3d; transition:transform .5s cubic-bezier(.22,1,.36,1);}
+  .flip-zone.flipped .flip-inner{transform:rotateY(180deg);}
+  .face{position:absolute; inset:0; backface-visibility:hidden; border-radius:16px; padding:26px; display:flex; align-items:center; justify-content:center; text-align:center; background:var(--paper); color:var(--paper-ink); box-shadow:0 12px 30px rgba(0,0,0,.35); font-size:16px; line-height:1.5;}
+  .face.front{font-family:'Fraunces',serif; font-size:19px; font-weight:500;}
+  .face.back{transform:rotateY(180deg); background:#fbf8f1;}
+  .face .tag{position:absolute; top:14px; left:16px; font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.06em; color:#8a7a58; text-transform:uppercase;}
+  .card-controls{display:flex; align-items:center; gap:16px;}
+  .card-controls .count{font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--text-lo);}
+  .icon-btn{all:unset; cursor:pointer; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; border:1px solid var(--line); color:var(--text-hi); font-size:14px;}
+  .icon-btn:hover{border-color:var(--amber); color:var(--amber);}
+
+  /* ---------- Quiz ---------- */
+  .progress-bar{height:4px; background:var(--panel-2); border-radius:999px; overflow:hidden;}
+  .progress-fill{height:100%; background:var(--amber); border-radius:999px; transition:width .35s ease;}
+  .q-card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:22px;}
+  .q-meta{display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-lo); margin-bottom:10px; font-family:'IBM Plex Mono',monospace;}
+  .q-text{font-family:'Fraunces',serif; font-size:19px; font-weight:500; margin-bottom:18px;}
+  .opt{display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:var(--panel-2); margin-bottom:8px; cursor:pointer; font-size:13.5px; transition:border-color .15s ease, background .15s ease;}
+  .opt:hover{border-color:var(--amber-dim);}
+  .opt .letter{font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-lo); width:20px; height:20px; border-radius:50%; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  .opt.correct{border-color:var(--teal); background:rgba(95,194,176,.1);}
+  .opt.correct .letter{border-color:var(--teal); color:var(--teal);}
+  .opt.wrong{border-color:var(--coral); background:rgba(224,102,92,.1);}
+  .opt.wrong .letter{border-color:var(--coral); color:var(--coral);}
+  .opt.disabled{cursor:default;}
+  .explain-line{font-size:12.5px; color:var(--text-lo); margin-top:12px; display:none;}
+  .quiz-foot{display:flex; justify-content:space-between; align-items:center; margin-top:6px;}
+  .score{font-family:'IBM Plex Mono',monospace; font-size:12.5px; color:var(--text-lo);}
+  .score b{color:var(--amber);}
+
+  /* ---------- Key gate ---------- */
+  .key-overlay{
+    position:fixed; inset:0; background:rgba(9,10,15,.82); backdrop-filter:blur(6px);
+    display:none; align-items:center; justify-content:center; z-index:50; padding:20px;
+  }
+  .key-modal{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:28px; max-width:380px; width:100%;}
+  .key-modal p{font-size:13px; color:var(--text-lo); line-height:1.6; margin:10px 0 18px;}
+  .key-modal input[type=password]{width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text-hi); padding:12px 14px; border-radius:10px; font-family:'IBM Plex Mono',monospace; font-size:13px;}
+  .key-modal-actions{display:flex; align-items:center; justify-content:space-between; margin-top:14px; gap:10px;}
+  .key-link{color:var(--amber); font-size:12px; text-decoration:none;}
+  .key-link:hover{text-decoration:underline;}
+  .key-error{color:var(--coral); font-size:12px; margin-top:10px; min-height:14px;}
+
+  @media (max-width:760px){
+    .app{grid-template-columns:1fr;}
+    .sidebar{flex-direction:row; align-items:center; padding:16px; gap:14px; overflow-x:auto;}
+    .sidebar-foot{display:none;}
+    .nav{flex-direction:row;}
+    .split{grid-template-columns:1fr;}
+    .stage{padding:20px;}
+    .flip-zone{width:100%;}
+  }
+</style>
+</head>
+<body>
+
+<div class="key-overlay" id="key-overlay">
+  <div class="key-modal">
+    <div class="wordmark">Tutor<span class="dot">.</span></div>
+    <p>This runs on your own OpenAI account. Your key stays in your browser and is sent straight to this app's backend on each request — never stored on our servers.</p>
+    <input type="password" id="key-input" placeholder="sk-...">
+    <div class="key-modal-actions">
+      <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="key-link">Get an API key ↗</a>
+      <button class="btn" id="key-save">Save &amp; continue</button>
+    </div>
+    <div class="key-error" id="key-error"></div>
+  </div>
+</div>
+
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="wordmark">Tutor<span class="dot">.</span></div>
+    <nav class="nav">
+      <button class="active" data-panel="explain"><span class="num">01</span>Explain</button>
+      <button data-panel="summarize"><span class="num">02</span>Summarize</button>
+      <button data-panel="cards"><span class="num">03</span>Flashcards</button>
+      <button data-panel="quiz"><span class="num">04</span>Quiz me</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="key-pill"><span class="status-dot"></span><b>API key</b> connected<button class="key-change" id="key-change">change</button></div>
+      <div style="margin-top:6px;">Your OpenAI usage, your account.</div>
+    </div>
+  </aside>
+
+  <main class="stage">
+
+    <!-- EXPLAIN -->
+    <section class="panel active" id="panel-explain">
+      <div class="panel-head">
+        <div><div class="panel-title">Explain a concept</div><div class="panel-sub">Same idea, tuned to how deep you want to go.</div></div>
+      </div>
+
+      <div class="dial-wrap">
+        <div class="dial-track" id="dial-explain">
+          <div class="dial-thumb" id="dial-thumb-explain"></div>
+          <button class="dial-stop" data-v="1">1</button>
+          <button class="dial-stop" data-v="2">2</button>
+          <button class="dial-stop on" data-v="3">3</button>
+          <button class="dial-stop" data-v="4">4</button>
+          <button class="dial-stop" data-v="5">5</button>
+        </div>
+        <div class="dial-caption"><span>Explained <b id="dial-label-explain">like a high schooler</b></span><span>Level <b id="dial-num-explain">3</b> of 5</span></div>
+      </div>
+
+      <div class="chat-scroll" id="chat-log"></div>
+
+      <div class="input-row">
+        <input type="text" id="explain-input" placeholder="Ask about any concept…" value="Explain black holes.">
+        <button class="btn" id="explain-send">Ask</button>
+      </div>
+    </section>
+
+    <!-- SUMMARIZE -->
+    <section class="panel" id="panel-summarize">
+      <div class="panel-head">
+        <div><div class="panel-title">Summarize a text</div><div class="panel-sub">Drop in a passage, dial in how short you need it.</div></div>
+      </div>
+
+      <div class="split">
+        <div class="card">
+          <h4>Source text</h4>
+          <textarea id="sum-input">Photosynthesis is the process by which green plants, algae, and some bacteria convert light energy into chemical energy. Using sunlight, water, and carbon dioxide, these organisms produce glucose and release oxygen as a byproduct. The process occurs mainly in the chloroplasts of plant cells, specifically using a pigment called chlorophyll that captures light energy. Photosynthesis is split into two main stages: the light-dependent reactions, which take place in the thylakoid membranes, and the light-independent reactions (the Calvin cycle), which occur in the stroma.</textarea>
+          <div class="ratio-row">
+            <span style="font-size:12px;color:var(--text-lo);">Compression</span>
+            <input type="range" id="ratio-slider" min="10" max="80" value="30">
+            <span class="ratio-val" id="ratio-val">30%</span>
+          </div>
+          <div style="margin-top:14px;"><button class="btn" id="sum-run">Summarize</button></div>
+        </div>
+        <div class="card">
+          <h4>Result</h4>
+          <div class="receipt" style="margin-bottom:12px;"><span class="arrow">→</span><span id="sum-receipt">summarize_text · ratio 0.30</span></div>
+          <div class="out-text" id="sum-out">Run it to see the summary stream in here.</div>
+          <div class="stat-row">
+            <div class="stat"><span class="n" id="stat-before">—</span><span class="l">words in</span></div>
+            <div class="stat"><span class="n" id="stat-after">—</span><span class="l">words out</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- FLASHCARDS -->
+    <section class="panel" id="panel-cards">
+      <div class="panel-head">
+        <div><div class="panel-title">Flashcards</div><div class="panel-sub">Tap a card to flip it.</div></div>
+        <div class="receipt" id="cards-receipt"><span class="arrow">→</span>generate_flashcards</div>
+      </div>
+
+      <div class="gen-row">
+        <input type="text" id="cards-topic" placeholder="Topic, e.g. Photosynthesis" value="Photosynthesis">
+        <input type="number" id="cards-count" min="1" max="20" value="5">
+        <button class="btn" id="cards-gen">Generate</button>
+      </div>
+
+      <div class="card-stage">
+        <div class="flip-zone" id="flip-zone">
+          <div class="flip-inner">
+            <div class="face front"><span class="tag">Question</span><span id="card-q">Generate a set to begin.</span></div>
+            <div class="face back"><span class="tag">Answer</span><span id="card-a"></span></div>
+          </div>
+        </div>
+        <div class="card-controls">
+          <button class="icon-btn" id="card-prev">←</button>
+          <span class="count" id="card-count">0 / 0</span>
+          <button class="icon-btn" id="card-next">→</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- QUIZ -->
+    <section class="panel" id="panel-quiz">
+      <div class="panel-head">
+        <div><div class="panel-title">Quiz me</div><div class="panel-sub">Multiple choice, graded as you go.</div></div>
+        <div class="receipt" id="quiz-receipt"><span class="arrow">→</span>quiz_me</div>
+      </div>
+
+      <div class="gen-row">
+        <input type="text" id="quiz-topic" placeholder="Topic, e.g. Photosynthesis" value="Photosynthesis">
+        <button class="btn" id="quiz-gen">Generate quiz</button>
+      </div>
+      <div class="dial-wrap">
+        <div class="dial-track small" id="dial-quiz">
+          <div class="dial-thumb" id="dial-thumb-quiz"></div>
+          <button class="dial-stop" data-v="1">1</button>
+          <button class="dial-stop" data-v="2">2</button>
+          <button class="dial-stop on" data-v="3">3</button>
+          <button class="dial-stop" data-v="4">4</button>
+          <button class="dial-stop" data-v="5">5</button>
+        </div>
+        <div class="dial-caption"><span>Difficulty <b id="dial-label-quiz">high school</b></span><span>Level <b id="dial-num-quiz">3</b> of 5</span></div>
+      </div>
+
+      <div class="progress-bar"><div class="progress-fill" id="quiz-progress" style="width:0%;"></div></div>
+
+      <div class="q-card">
+        <div class="q-meta"><span id="q-index">No quiz yet</span><span id="q-status"></span></div>
+        <div class="q-text" id="q-text">Generate a quiz above to begin.</div>
+        <div id="q-options"></div>
+        <div class="explain-line" id="q-explain"></div>
+      </div>
+
+      <div class="quiz-foot">
+        <span class="score">Score: <b id="q-score">0</b> / <span id="q-total">0</span></span>
+        <button class="btn ghost" id="q-next">Next question</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+/* ==================== Config ==================== */
+// Point this at your deployed backend before shipping.
+const API_BASE = 'http://localhost:8000';
+
+/* ==================== Key management ==================== */
+function getKey(){ return localStorage.getItem('tutor_openai_key') || ''; }
+function setKey(k){ localStorage.setItem('tutor_openai_key', k); }
+function clearKey(){ localStorage.removeItem('tutor_openai_key'); }
+function updateKeyUI(){
+  document.getElementById('key-overlay').style.display = getKey() ? 'none' : 'flex';
+}
+document.getElementById('key-save').addEventListener('click', ()=>{
+  const val = document.getElementById('key-input').value.trim();
+  const err = document.getElementById('key-error');
+  if(!val.startsWith('sk-')){
+    err.textContent = 'That doesn\'t look like a valid OpenAI key — keys start with "sk-".';
+    return;
+  }
+  err.textContent = '';
+  setKey(val);
+  updateKeyUI();
+});
+document.getElementById('key-change').addEventListener('click', ()=>{
+  document.getElementById('key-input').value = '';
+  document.getElementById('key-error').textContent = '';
+  document.getElementById('key-overlay').style.display = 'flex';
+});
+updateKeyUI();
+
+async function apiStream(path, body, onChunk){
+  const res = await fetch(API_BASE + path, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-OpenAI-Key':getKey()},
+    body:JSON.stringify(body)
+  });
+  if(res.status === 401){ clearKey(); updateKeyUI(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(!res.ok){ throw new Error('Something went wrong talking to the tutor backend.'); }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = '';
+  while(true){
+    const {done, value} = await reader.read();
+    if(done) break;
+    full += decoder.decode(value, {stream:true});
+    onChunk(full);
+  }
+  return full;
+}
+async function apiJSON(path, body){
+  const res = await fetch(API_BASE + path, {
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-OpenAI-Key':getKey()},
+    body:JSON.stringify(body)
+  });
+  if(res.status === 401){ clearKey(); updateKeyUI(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(!res.ok){ throw new Error('Something went wrong talking to the tutor backend.'); }
+  return res.json();
+}
+
+/* ==================== Nav ==================== */
+document.querySelectorAll('.nav button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-'+btn.dataset.panel).classList.add('active');
+  });
+});
+
+/* ==================== Dial helper ==================== */
+const LEVELS = ['like a 5 year old','like a 10 year old','like a high schooler','like a college student','like an expert'];
+const LEVELS_SHORT = ['very easy','easy','high school','college','expert'];
+function setDial(prefix, value){
+  const track = document.getElementById('dial-'+prefix);
+  const thumb = document.getElementById('dial-thumb-'+prefix);
+  track.querySelectorAll('.dial-stop').forEach(s=> s.classList.toggle('on', Number(s.dataset.v)===value));
+  thumb.style.transform = `translateX(${(value-1)*100}%)`;
+}
+function wireDial(prefix, onSet){
+  document.querySelectorAll('#dial-'+prefix+' .dial-stop').forEach(stop=>{
+    stop.addEventListener('click', ()=>{
+      const v = Number(stop.dataset.v);
+      setDial(prefix, v);
+      onSet(v);
+    });
+  });
+}
+
+let explainLevel = 3;
+wireDial('explain', v=>{
+  explainLevel = v;
+  document.getElementById('dial-label-explain').textContent = LEVELS[v-1];
+  document.getElementById('dial-num-explain').textContent = v;
+});
+setDial('explain', 3);
+
+let quizLevel = 3;
+wireDial('quiz', v=>{
+  quizLevel = v;
+  document.getElementById('dial-label-quiz').textContent = LEVELS_SHORT[v-1];
+  document.getElementById('dial-num-quiz').textContent = v;
+});
+setDial('quiz', 3);
+
+/* ==================== Explain ==================== */
+document.getElementById('explain-send').addEventListener('click', async ()=>{
+  if(!getKey()){ updateKeyUI(); return; }
+  const log = document.getElementById('chat-log');
+  const q = document.getElementById('explain-input').value.trim() || 'Explain black holes.';
+  const btn = document.getElementById('explain-send');
+
+  const userBubble = document.createElement('div');
+  userBubble.className = 'bubble user'; userBubble.textContent = q;
+  log.appendChild(userBubble);
+
+  const receipt = document.createElement('div');
+  receipt.className = 'receipt';
+  receipt.innerHTML = `<span class="arrow">→</span>explain_concept · level ${explainLevel}`;
+  log.appendChild(receipt);
+
+  const aiBubble = document.createElement('div');
+  aiBubble.className = 'bubble ai';
+  aiBubble.style.setProperty('--glow', (0.04 + explainLevel*0.03));
+  aiBubble.innerHTML = '<span class="cursor"></span>';
+  log.appendChild(aiBubble);
+  log.scrollTop = 9999;
+
+  btn.textContent = 'Thinking…'; btn.disabled = true;
+  try{
+    await apiStream('/api/explain', {question:q, level:explainLevel}, partial=>{
+      aiBubble.innerHTML = partial + '<span class="cursor"></span>';
+      log.scrollTop = 9999;
+    });
+    const c = aiBubble.querySelector('.cursor'); if(c) c.remove();
+  }catch(e){
+    aiBubble.textContent = e.message;
+    aiBubble.style.color = 'var(--coral)';
+  }finally{
+    btn.textContent = 'Ask'; btn.disabled = false;
+  }
+});
+
+/* ==================== Summarize ==================== */
+const ratioSlider = document.getElementById('ratio-slider');
+const ratioVal = document.getElementById('ratio-val');
+ratioSlider.addEventListener('input', ()=> ratioVal.textContent = ratioSlider.value + '%');
+
+document.getElementById('sum-run').addEventListener('click', async ()=>{
+  if(!getKey()){ updateKeyUI(); return; }
+  const btn = document.getElementById('sum-run');
+  const ratio = Number(ratioSlider.value)/100;
+  const text = document.getElementById('sum-input').value.trim();
+  const out = document.getElementById('sum-out');
+  document.getElementById('sum-receipt').textContent = `summarize_text · ratio ${ratio.toFixed(2)}`;
+  document.getElementById('stat-before').textContent = text.split(/\s+/).filter(Boolean).length;
+  document.getElementById('stat-after').textContent = '—';
+  out.textContent = '';
+  btn.textContent = 'Summarizing…'; btn.disabled = true;
+  try{
+    const full = await apiStream('/api/summarize', {text, compression_ratio:ratio}, partial=>{ out.textContent = partial; });
+    document.getElementById('stat-after').textContent = full.split(/\s+/).filter(Boolean).length;
+  }catch(e){
+    out.textContent = e.message; out.style.color = 'var(--coral)';
+  }finally{
+    btn.textContent = 'Summarize'; btn.disabled = false;
+  }
+});
+
+/* ==================== Flashcards ==================== */
+let CARDS = [];
+let cardIdx = 0;
+const flipZone = document.getElementById('flip-zone');
+function renderCard(){
+  if(!CARDS.length){
+    document.getElementById('card-q').textContent = 'Generate a set to begin.';
+    document.getElementById('card-a').textContent = '';
+    document.getElementById('card-count').textContent = '0 / 0';
+    return;
+  }
+  document.getElementById('card-q').textContent = CARDS[cardIdx].q;
+  document.getElementById('card-a').textContent = CARDS[cardIdx].a;
+  document.getElementById('card-count').textContent = `${cardIdx+1} / ${CARDS.length}`;
+  flipZone.classList.remove('flipped');
+}
+flipZone.addEventListener('click', ()=> CARDS.length && flipZone.classList.toggle('flipped'));
+document.getElementById('card-next').addEventListener('click', ()=>{ if(!CARDS.length) return; cardIdx=(cardIdx+1)%CARDS.length; renderCard(); });
+document.getElementById('card-prev').addEventListener('click', ()=>{ if(!CARDS.length) return; cardIdx=(cardIdx-1+CARDS.length)%CARDS.length; renderCard(); });
+
+document.getElementById('cards-gen').addEventListener('click', async ()=>{
+  if(!getKey()){ updateKeyUI(); return; }
+  const btn = document.getElementById('cards-gen');
+  const topic = document.getElementById('cards-topic').value.trim() || 'Photosynthesis';
+  const count = Number(document.getElementById('cards-count').value) || 5;
+  btn.textContent = 'Generating…'; btn.disabled = true;
+  try{
+    const data = await apiJSON('/api/flashcards', {topic, num_cards:count});
+    CARDS = data.cards || [];
+    cardIdx = 0;
+    renderCard();
+    document.getElementById('cards-receipt').innerHTML = `<span class="arrow">→</span>generate_flashcards · topic "${topic}" · ${CARDS.length} cards`;
+  }catch(e){
+    alert(e.message);
+  }finally{
+    btn.textContent = 'Generate'; btn.disabled = false;
+  }
+});
+
+/* ==================== Quiz ==================== */
+let QUIZ = [];
+let quizIdx = 0, quizScore = 0, answered = false;
+
+function renderQuiz(){
+  if(!QUIZ.length){
+    document.getElementById('q-index').textContent = 'No quiz yet';
+    document.getElementById('q-text').textContent = 'Generate a quiz above to begin.';
+    document.getElementById('q-options').innerHTML = '';
+    document.getElementById('quiz-progress').style.width = '0%';
+    document.getElementById('q-total').textContent = '0';
+    return;
+  }
+  const item = QUIZ[quizIdx];
+  document.getElementById('q-index').textContent = `Question ${quizIdx+1} of ${QUIZ.length}`;
+  document.getElementById('q-status').textContent = 'Not answered';
+  document.getElementById('q-text').textContent = item.q;
+  document.getElementById('q-score').textContent = quizScore;
+  document.getElementById('q-total').textContent = QUIZ.length;
+  document.getElementById('quiz-progress').style.width = `${(quizIdx/QUIZ.length)*100 + 20}%`;
+  document.getElementById('q-explain').style.display = 'none';
+  answered = false;
+
+  const wrap = document.getElementById('q-options');
+  wrap.innerHTML = '';
+  const letters = ['A','B','C','D'];
+  item.opts.forEach((opt,i)=>{
+    const el = document.createElement('div');
+    el.className = 'opt';
+    el.innerHTML = `<span class="letter">${letters[i]||i+1}</span><span>${opt}</span>`;
+    el.addEventListener('click', ()=>{
+      if(answered) return;
+      answered = true;
+      document.querySelectorAll('#q-options .opt').forEach(o=>o.classList.add('disabled'));
+      if(i===item.correct){
+        el.classList.add('correct'); quizScore++;
+        document.getElementById('q-status').textContent = 'Correct';
+      } else {
+        el.classList.add('wrong');
+        wrap.children[item.correct]?.classList.add('correct');
+        document.getElementById('q-status').textContent = 'Incorrect';
+      }
+      document.getElementById('q-score').textContent = quizScore;
+      const ex = document.getElementById('q-explain');
+      ex.textContent = item.note || '';
+      ex.style.display = item.note ? 'block' : 'none';
+    });
+    wrap.appendChild(el);
+  });
+}
+document.getElementById('q-next').addEventListener('click', ()=>{
+  if(!QUIZ.length) return;
+  quizIdx = (quizIdx+1) % QUIZ.length;
+  if(quizIdx===0) quizScore = 0;
+  renderQuiz();
+});
+
+document.getElementById('quiz-gen').addEventListener('click', async ()=>{
+  if(!getKey()){ updateKeyUI(); return; }
+  const btn = document.getElementById('quiz-gen');
+  const topic = document.getElementById('quiz-topic').value.trim() || 'Photosynthesis';
+  btn.textContent = 'Generating…'; btn.disabled = true;
+  try{
+    const data = await apiJSON('/api/quiz', {topic, level:quizLevel, num_questions:5});
+    QUIZ = data.questions || [];
+    quizIdx = 0; quizScore = 0;
+    renderQuiz();
+    document.getElementById('quiz-receipt').innerHTML = `<span class="arrow">→</span>quiz_me · level ${quizLevel} · ${QUIZ.length} questions`;
+  }catch(e){
+    alert(e.message);
+  }finally{
+    btn.textContent = 'Generate quiz'; btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
