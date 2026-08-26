@@ -32,7 +32,7 @@ app = FastAPI(title="AI Tutor API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5500",
+        "https://ai-tutor-1-xlj0.onrender.com/",
         "http://127.0.0.1:5500",
         # "https://your-frontend-domain.com",
     ],
