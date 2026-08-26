@@ -210,7 +210,8 @@
 <div class="key-overlay" id="key-overlay">
   <div class="key-modal">
     <div class="wordmark">Tutor<span class="dot">.</span></div>
-    <p>This runs on your own OpenAI account. Your key stays in your browser and is sent straight to this app's backend on each request — never stored on our servers.</p>
+    <p id="key-modal-reason">You've used your free questions on this app.</p>
+    <p>Add your own OpenAI key to keep going. It stays in your browser and is sent straight to this app's backend on each request — never stored on our servers.</p>
     <input type="password" id="key-input" placeholder="sk-...">
     <div class="key-modal-actions">
       <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" class="key-link">Get an API key ↗</a>
@@ -231,7 +232,7 @@
       <button data-panel="quiz"><span class="num">04</span>Quiz me</button>
     </nav>
     <div class="sidebar-foot">
-      <div class="key-pill"><span class="status-dot"></span><b>API key</b> connected<button class="key-change" id="key-change">change</button></div>
+      <div class="key-pill" id="key-status-pill"><span class="status-dot"></span><span id="key-status-text">Checking free queries…</span></div>
       <div style="margin-top:6px;">Your OpenAI usage, your account.</div>
     </div>
   </aside>
@@ -367,12 +368,21 @@
 // Point this at your deployed backend before shipping.
 const API_BASE = 'https://ai-tutor-ehby.onrender.com';
 
-/* ==================== Key management ==================== */
+/* ==================== Key management ====================
+   No upfront gate: the app is usable immediately on the server's free
+   tier (a handful of queries per visitor). The key modal only appears
+   once the backend says the free tier is used up (HTTP 429), or if a
+   key the visitor entered gets rejected (HTTP 401). */
 function getKey(){ return localStorage.getItem('tutor_openai_key') || ''; }
 function setKey(k){ localStorage.setItem('tutor_openai_key', k); }
 function clearKey(){ localStorage.removeItem('tutor_openai_key'); }
-function updateKeyUI(){
-  document.getElementById('key-overlay').style.display = getKey() ? 'none' : 'flex';
+
+function showKeyGate(reason){
+  document.getElementById('key-modal-reason').textContent = reason || "You've used your free questions on this app.";
+  document.getElementById('key-overlay').style.display = 'flex';
+}
+function hideKeyGate(){
+  document.getElementById('key-overlay').style.display = 'none';
 }
 document.getElementById('key-save').addEventListener('click', ()=>{
   const val = document.getElementById('key-input').value.trim();
@@ -383,22 +393,47 @@ document.getElementById('key-save').addEventListener('click', ()=>{
   }
   err.textContent = '';
   setKey(val);
-  updateKeyUI();
+  hideKeyGate();
+  renderStatusPill();
 });
-document.getElementById('key-change').addEventListener('click', ()=>{
-  document.getElementById('key-input').value = '';
-  document.getElementById('key-error').textContent = '';
-  document.getElementById('key-overlay').style.display = 'flex';
-});
-updateKeyUI();
+
+/* ---- sidebar status pill: shows "API key connected" once the visitor
+   has saved their own key, otherwise fetches remaining free-query count
+   from the backend. Re-run after every request that spends a query. */
+async function renderStatusPill(){
+  const pill = document.getElementById('key-status-text');
+  if(getKey()){
+    pill.innerHTML = 'API key connected <button class="key-change" id="key-change">change</button>';
+    document.getElementById('key-change').addEventListener('click', ()=>{
+      document.getElementById('key-input').value = '';
+      document.getElementById('key-error').textContent = '';
+      showKeyGate('Swap in a different OpenAI key.');
+    });
+    return;
+  }
+  try{
+    const res = await fetch(API_BASE + '/api/usage');
+    const data = await res.json();
+    pill.innerHTML = `${data.remaining} of ${data.limit} free queries left <button class="key-change" id="key-change">use your own key</button>`;
+    document.getElementById('key-change').addEventListener('click', ()=>{
+      document.getElementById('key-input').value = '';
+      document.getElementById('key-error').textContent = '';
+      showKeyGate('Use your own OpenAI key instead of the shared free tier.');
+    });
+  }catch(e){
+    pill.textContent = 'Free tier available';
+  }
+}
+renderStatusPill();
 
 async function apiStream(path, body, onChunk){
   const res = await fetch(API_BASE + path, {
     method:'POST',
-    headers:{'Content-Type':'application/json','X-OpenAI-Key':getKey()},
+    headers:{'Content-Type':'application/json', ...(getKey() ? {'X-OpenAI-Key':getKey()} : {})},
     body:JSON.stringify(body)
   });
-  if(res.status === 401){ clearKey(); updateKeyUI(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(res.status === 401){ clearKey(); showKeyGate('Your key was rejected — add a valid OpenAI API key to continue.'); renderStatusPill(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(res.status === 429){ showKeyGate(); renderStatusPill(); throw new Error("You've used your free questions. Add your own OpenAI API key to keep going."); }
   if(!res.ok){ throw new Error('Something went wrong talking to the tutor backend.'); }
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -409,17 +444,21 @@ async function apiStream(path, body, onChunk){
     full += decoder.decode(value, {stream:true});
     onChunk(full);
   }
+  renderStatusPill();
   return full;
 }
 async function apiJSON(path, body){
   const res = await fetch(API_BASE + path, {
     method:'POST',
-    headers:{'Content-Type':'application/json','X-OpenAI-Key':getKey()},
+    headers:{'Content-Type':'application/json', ...(getKey() ? {'X-OpenAI-Key':getKey()} : {})},
     body:JSON.stringify(body)
   });
-  if(res.status === 401){ clearKey(); updateKeyUI(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(res.status === 401){ clearKey(); showKeyGate('Your key was rejected — add a valid OpenAI API key to continue.'); renderStatusPill(); throw new Error('Your key was rejected. Add a valid OpenAI API key to continue.'); }
+  if(res.status === 429){ showKeyGate(); renderStatusPill(); throw new Error("You've used your free questions. Add your own OpenAI API key to keep going."); }
   if(!res.ok){ throw new Error('Something went wrong talking to the tutor backend.'); }
-  return res.json();
+  const data = await res.json();
+  renderStatusPill();
+  return data;
 }
 
 /* ==================== Nav ==================== */
@@ -469,7 +508,6 @@ setDial('quiz', 3);
 
 /* ==================== Explain ==================== */
 document.getElementById('explain-send').addEventListener('click', async ()=>{
-  if(!getKey()){ updateKeyUI(); return; }
   const log = document.getElementById('chat-log');
   const q = document.getElementById('explain-input').value.trim() || 'Explain black holes.';
   const btn = document.getElementById('explain-send');
@@ -511,7 +549,6 @@ const ratioVal = document.getElementById('ratio-val');
 ratioSlider.addEventListener('input', ()=> ratioVal.textContent = ratioSlider.value + '%');
 
 document.getElementById('sum-run').addEventListener('click', async ()=>{
-  if(!getKey()){ updateKeyUI(); return; }
   const btn = document.getElementById('sum-run');
   const ratio = Number(ratioSlider.value)/100;
   const text = document.getElementById('sum-input').value.trim();
@@ -552,7 +589,6 @@ document.getElementById('card-next').addEventListener('click', ()=>{ if(!CARDS.l
 document.getElementById('card-prev').addEventListener('click', ()=>{ if(!CARDS.length) return; cardIdx=(cardIdx-1+CARDS.length)%CARDS.length; renderCard(); });
 
 document.getElementById('cards-gen').addEventListener('click', async ()=>{
-  if(!getKey()){ updateKeyUI(); return; }
   const btn = document.getElementById('cards-gen');
   const topic = document.getElementById('cards-topic').value.trim() || 'Photosynthesis';
   const count = Number(document.getElementById('cards-count').value) || 5;
@@ -628,7 +664,6 @@ document.getElementById('q-next').addEventListener('click', ()=>{
 });
 
 document.getElementById('quiz-gen').addEventListener('click', async ()=>{
-  if(!getKey()){ updateKeyUI(); return; }
   const btn = document.getElementById('quiz-gen');
   const topic = document.getElementById('quiz-topic').value.trim() || 'Photosynthesis';
   btn.textContent = 'Generating…'; btn.disabled = true;
