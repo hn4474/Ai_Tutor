@@ -23,16 +23,20 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from openai import OpenAI, AuthenticationError
+from openai import OpenAI, AuthenticationError, APIError
 
 app = FastAPI(title="AI Tutor API")
 
 # Lock this down to your real frontend domain(s) before going live.
 # "*" is fine for local development only.
+# NOTE: CORS origins must NOT have a trailing slash — browsers send the
+# Origin header as scheme://host[:port] only, so "…onrender.com/" never
+# matches "…onrender.com" and every real request from that origin gets
+# blocked by the browser at the CORS-preflight stage.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://ai-tutor-1-xlj0.onrender.com/",
+        "https://ai-tutor-1-xlj0.onrender.com",
         "http://127.0.0.1:5500",
         # "https://your-frontend-domain.com",
     ],
@@ -63,15 +67,19 @@ def client_for(x_openai_key: Optional[str]) -> OpenAI:
 
 
 def auth_wrapped_stream(gen):
-    """Run a generator that may raise AuthenticationError on first use,
-    surfacing it as text the frontend can show instead of a silent 401
+    """Run a generator that may raise on first use, surfacing errors as
+    text the frontend can show instead of the connection just dying
     mid-stream (streaming responses can't change their status code once
-    they've started)."""
+    they've started, so this is the only way the caller finds out)."""
     try:
         for chunk in gen:
             yield chunk
     except AuthenticationError:
         yield "\n\n[Your OpenAI key was rejected — check it in Settings.]"
+    except APIError as e:
+        yield f"\n\n[The AI provider had a problem ({e.__class__.__name__}). Please try again.]"
+    except Exception:
+        yield "\n\n[Something went wrong generating a response. Please try again.]"
 
 
 # ---------------------------------------------------------------- explain
@@ -157,6 +165,8 @@ def flashcards(req: FlashcardsReq, x_openai_key: Optional[str] = Header(default=
         )
     except AuthenticationError:
         raise HTTPException(status_code=401, detail="Your OpenAI key was rejected.")
+    except APIError as e:
+        raise HTTPException(status_code=502, detail=f"The AI provider had a problem ({e.__class__.__name__}). Please try again.")
 
     raw = resp.choices[0].message.content.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
@@ -192,6 +202,8 @@ def quiz(req: QuizReq, x_openai_key: Optional[str] = Header(default=None)):
         )
     except AuthenticationError:
         raise HTTPException(status_code=401, detail="Your OpenAI key was rejected.")
+    except APIError as e:
+        raise HTTPException(status_code=502, detail=f"The AI provider had a problem ({e.__class__.__name__}). Please try again.")
 
     raw = resp.choices[0].message.content.strip()
     raw = raw.removeprefix("```json").removeprefix("```").removesuffix("```").strip()
