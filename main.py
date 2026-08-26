@@ -2,24 +2,31 @@
 AI Tutor backend
 =================
 Wraps the four tool functions from tutor_mcp_server_v2.py as plain HTTP
-endpoints. No server-side OpenAI key is ever used for real requests —
-every call must carry the caller's own key in the X-OpenAI-Key header.
-That header never gets logged or persisted; a fresh OpenAI client is
-built per-request and discarded.
+endpoints.
+
+Free tier: the first FREE_QUERY_LIMIT requests from any given visitor
+(tracked by IP) ride on the server's own OpenAI key, set via the
+OPENAI_API_KEY environment variable — never hardcoded in this file, so it
+never ends up in the GitHub repo's history. After that, a request needs
+the caller's own key in the X-OpenAI-Key header (never logged or
+persisted; a fresh OpenAI client is built per-request and discarded).
 
 Run locally:
     pip install -r requirements.txt
-    uvicorn main:app --reload --port 8000
+    OPENAI_API_KEY=sk-... uvicorn main:app --reload --port 8000
 
 Deploy anywhere that runs a Python process (Railway, Render, Fly.io,
-a VPS). Nothing here needs an OPENAI_API_KEY environment variable —
-that's the point.
+a VPS). Set OPENAI_API_KEY in that host's environment-variable settings
+to fund the free tier — the app still works without it, it just has no
+free tier and requires every caller to supply their own key.
 """
 
 import json
+import os
+from collections import defaultdict
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -54,19 +61,74 @@ EXPLANATION_LEVELS = {
     5: "like an expert in the field",
 }
 
+# ------------------------------------------------------------- free tier
+FREE_QUERY_LIMIT = 5
 
-def client_for(x_openai_key: Optional[str]) -> OpenAI:
-    """Build a per-request OpenAI client from the caller's own key.
-    Never falls back to a server-side key."""
-    if not x_openai_key or not x_openai_key.startswith("sk-"):
-        raise HTTPException(
-            status_code=401,
-            detail="Missing or invalid OpenAI API key. Add your key to continue.",
-        )
-    return OpenAI(api_key=x_openai_key)
+# Set this in your host's environment variables (Render: Settings ->
+# Environment). Deliberately NOT read from a hardcoded string here — a key
+# committed to GitHub is one leak away from being drained by bots that
+# scan public repos for "sk-" strings, and if the repo is or becomes
+# public, GitHub/OpenAI's secret scanning will typically auto-revoke it
+# within minutes anyway.
+SERVER_OPENAI_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# In-memory per-IP free-query counter, shared across all four endpoints.
+# This is best-effort, not bulletproof: it resets whenever the process
+# restarts (Render's free tier spins a service down after ~15 minutes idle
+# and back up on the next request, clearing this dict), it isn't shared
+# across multiple instances if you ever scale beyond one, and a visitor
+# who really wants more than 5 free queries can get them by switching
+# networks/VPNs. It stops casual overuse, not a determined abuser — set a
+# hard monthly spending limit on the OpenAI account behind this key as the
+# actual backstop.
+usage_by_ip = defaultdict(int)
 
 
-def auth_wrapped_stream(gen):
+def real_client_ip(request: Request) -> str:
+    """Render (and most hosts) sit behind a proxy, so request.client.host
+    is the proxy's address, not the visitor's. The real IP is the first
+    entry in X-Forwarded-For when present."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def client_for(request: Request, x_openai_key: Optional[str]) -> tuple[OpenAI, bool]:
+    """Pick which OpenAI key to bill this request to.
+
+    Returns (client, used_free_tier). A caller-supplied key always wins
+    and is never rate-limited. Otherwise the first FREE_QUERY_LIMIT
+    requests from an IP ride on the server's own key; after that a
+    caller-supplied key becomes required.
+    """
+    if x_openai_key and x_openai_key.startswith("sk-"):
+        return OpenAI(api_key=x_openai_key), False
+
+    ip = real_client_ip(request)
+    if usage_by_ip[ip] < FREE_QUERY_LIMIT:
+        if not SERVER_OPENAI_KEY:
+            raise HTTPException(
+                status_code=500,
+                detail="This server has no free-tier key configured. Add your own OpenAI API key to continue.",
+            )
+        usage_by_ip[ip] += 1
+        return OpenAI(api_key=SERVER_OPENAI_KEY), True
+
+    raise HTTPException(
+        status_code=429,
+        detail=f"You've used your {FREE_QUERY_LIMIT} free questions. Add your own OpenAI API key to keep going.",
+    )
+
+
+@app.get("/api/usage")
+def usage(request: Request):
+    """Lets the frontend show 'N free queries left' without spending one."""
+    used = usage_by_ip[real_client_ip(request)]
+    return {"used": used, "limit": FREE_QUERY_LIMIT, "remaining": max(0, FREE_QUERY_LIMIT - used)}
+
+
+def auth_wrapped_stream(gen, used_free_tier: bool = False):
     """Run a generator that may raise on first use, surfacing errors as
     text the frontend can show instead of the connection just dying
     mid-stream (streaming responses can't change their status code once
@@ -75,7 +137,10 @@ def auth_wrapped_stream(gen):
         for chunk in gen:
             yield chunk
     except AuthenticationError:
-        yield "\n\n[Your OpenAI key was rejected — check it in Settings.]"
+        if used_free_tier:
+            yield "\n\n[The server's free-tier key isn't working right now. Please try again later, or add your own key.]"
+        else:
+            yield "\n\n[Your OpenAI key was rejected — check it in Settings.]"
     except APIError as e:
         yield f"\n\n[The AI provider had a problem ({e.__class__.__name__}). Please try again.]"
     except Exception:
@@ -89,8 +154,8 @@ class ExplainReq(BaseModel):
 
 
 @app.post("/api/explain")
-def explain(req: ExplainReq, x_openai_key: Optional[str] = Header(default=None)):
-    client = client_for(x_openai_key)
+def explain(req: ExplainReq, request: Request, x_openai_key: Optional[str] = Header(default=None)):
+    client, used_free_tier = client_for(request, x_openai_key)
     level_desc = EXPLANATION_LEVELS.get(req.level, "clearly and concisely")
 
     def gen():
@@ -108,7 +173,7 @@ def explain(req: ExplainReq, x_openai_key: Optional[str] = Header(default=None))
             if delta:
                 yield delta
 
-    return StreamingResponse(auth_wrapped_stream(gen()), media_type="text/plain")
+    return StreamingResponse(auth_wrapped_stream(gen(), used_free_tier), media_type="text/plain")
 
 
 # -------------------------------------------------------------- summarize
@@ -118,8 +183,8 @@ class SummarizeReq(BaseModel):
 
 
 @app.post("/api/summarize")
-def summarize(req: SummarizeReq, x_openai_key: Optional[str] = Header(default=None)):
-    client = client_for(x_openai_key)
+def summarize(req: SummarizeReq, request: Request, x_openai_key: Optional[str] = Header(default=None)):
+    client, used_free_tier = client_for(request, x_openai_key)
 
     def gen():
         stream = client.chat.completions.create(
@@ -139,7 +204,7 @@ def summarize(req: SummarizeReq, x_openai_key: Optional[str] = Header(default=No
             if delta:
                 yield delta
 
-    return StreamingResponse(auth_wrapped_stream(gen()), media_type="text/plain")
+    return StreamingResponse(auth_wrapped_stream(gen(), used_free_tier), media_type="text/plain")
 
 
 # -------------------------------------------------------------- flashcards
@@ -149,8 +214,8 @@ class FlashcardsReq(BaseModel):
 
 
 @app.post("/api/flashcards")
-def flashcards(req: FlashcardsReq, x_openai_key: Optional[str] = Header(default=None)):
-    client = client_for(x_openai_key)
+def flashcards(req: FlashcardsReq, request: Request, x_openai_key: Optional[str] = Header(default=None)):
+    client, used_free_tier = client_for(request, x_openai_key)
     try:
         resp = client.chat.completions.create(
             model=MODEL_NAME,
@@ -164,6 +229,8 @@ def flashcards(req: FlashcardsReq, x_openai_key: Optional[str] = Header(default=
             temperature=0.8,
         )
     except AuthenticationError:
+        if used_free_tier:
+            raise HTTPException(status_code=500, detail="The server's free-tier key isn't working right now. Please try again later or use your own key.")
         raise HTTPException(status_code=401, detail="Your OpenAI key was rejected.")
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"The AI provider had a problem ({e.__class__.__name__}). Please try again.")
@@ -185,8 +252,8 @@ class QuizReq(BaseModel):
 
 
 @app.post("/api/quiz")
-def quiz(req: QuizReq, x_openai_key: Optional[str] = Header(default=None)):
-    client = client_for(x_openai_key)
+def quiz(req: QuizReq, request: Request, x_openai_key: Optional[str] = Header(default=None)):
+    client, used_free_tier = client_for(request, x_openai_key)
     level_desc = EXPLANATION_LEVELS.get(req.level, "at an intermediate level")
     try:
         resp = client.chat.completions.create(
@@ -201,6 +268,8 @@ def quiz(req: QuizReq, x_openai_key: Optional[str] = Header(default=None)):
             temperature=0.7,
         )
     except AuthenticationError:
+        if used_free_tier:
+            raise HTTPException(status_code=500, detail="The server's free-tier key isn't working right now. Please try again later or use your own key.")
         raise HTTPException(status_code=401, detail="Your OpenAI key was rejected.")
     except APIError as e:
         raise HTTPException(status_code=502, detail=f"The AI provider had a problem ({e.__class__.__name__}). Please try again.")
